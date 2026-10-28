@@ -1528,6 +1528,8 @@ fn run_trash(paths: &[PathBuf], progress: Option<&mpsc::Sender<JobMessage>>) -> 
     run_trash_all_with(paths, progress, |paths| file_ops::trash_delete_all(paths))
 }
 
+// Tests trash through `run_trash_with` so they never touch the real Trash.
+#[cfg_attr(test, allow(dead_code))]
 fn run_trash_all_with<F, E>(
     paths: &[PathBuf],
     progress: Option<&mpsc::Sender<JobMessage>>,
