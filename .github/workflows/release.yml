@@ -1,0 +1,119 @@
+name: Release
+
+# Tagging vX.Y.Z (after bumping `version` in the root Cargo.toml) builds all
+# three platform bundles on native runners and publishes them as a GitHub
+# release with SHA-256 checksums. No cross-compilation is involved: each job
+# builds for its own architecture.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify the tag matches the Cargo.toml version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          [ -n "$VERSION" ]
+          APP_VERSION=$(cargo metadata --locked --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "lumiere"))')
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::tag v${TAG} does not match Cargo.toml version ${VERSION}"
+            exit 1
+          fi
+          if [ "$TAG" != "$APP_VERSION" ]; then
+            echo "::error::tag v${TAG} does not match lumiere version ${APP_VERSION}"
+            exit 1
+          fi
+
+  build-macos:
+    needs: check-version
+    runs-on: macos-latest   # arm64; the release archive is Apple Silicon only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: ./bundle.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.zip
+
+  build-linux:
+    needs: check-version
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - run: apt-get update && apt-get install -y build-essential ca-certificates curl git pkg-config dpkg-dev file
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # 三種格式共用建置結果；AppImage 工具固定版本並驗證雜湊。
+      - run: ./bundle-linux.sh dist
+      - run: ./bundle-linux-deb.sh dist
+      - run: ./bundle-linux-appimage.sh dist
+      - name: Check package contents and launch on Ubuntu 22.04
+        run: |
+          apt-get install -y xvfb xauth x11-utils libgl1-mesa-dri
+          apt-get install -y ./dist/*.deb
+          ./test-linux-packages.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.AppImage
+
+  build-windows:
+    needs: check-version
+    runs-on: windows-latest # x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: .\bundle-windows.ps1 dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+
+  publish:
+    needs: [check-version, build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: SHA-256 checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name '*.zip' -o -name '*.tar.gz' \
+            -o -name '*.deb' -o -name '*.AppImage' \) -print0 \
+            | xargs -0 sha256sum \
+            | sed 's|  \./[^/]*/|  |' \
+            | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Set release title
+        id: release_title
+        run: echo "name=Lumiere ${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.release_title.outputs.name }}
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/SHA256SUMS.txt
+          generate_release_notes: true

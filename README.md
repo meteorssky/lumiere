@@ -1,17 +1,10 @@
-<p align="center">
-  <img src="assets/AppIcon.png" alt="Lumiere icon" width="128" height="128">
-</p>
+# Lumiere
 
-<h1 align="center">Lumiere</h1>
+[![CI](https://github.com/fetag/lumiere/actions/workflows/ci.yml/badge.svg)](https://github.com/fetag/lumiere/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/fetag/lumiere?label=latest)](https://github.com/fetag/lumiere/releases/latest)
 
-<p align="center">
-  A native-feeling image browser and viewer for macOS, Linux, and Windows, built in Rust with
-  <a href="https://github.com/emilk/egui">egui</a>/<a href="https://github.com/emilk/egui/tree/master/crates/eframe">eframe</a>.
-</p>
-
-<p align="center">
-  Three-pane browsing, full-screen viewing, slideshow, and platform-adaptive UI.
-</p>
+A native-feeling image browser and viewer for macOS, Linux, and Windows, built in Rust with [egui](https://github.com/emilk/egui)/[eframe](https://github.com/emilk/egui/tree/master/crates/eframe). Three-pane browsing, full-screen viewing, slideshow, and platform-adaptive UI.
 
 ---
 
@@ -57,19 +50,20 @@ cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets
 ```
 
-The current headless UI suite contains macOS-native assertions, so CI runs its
-full serial test command on macOS:
+The current headless UI suite contains macOS-native assertions, so CI runs the
+full test command (with the default parallelism) on macOS:
 
 ```sh
-cargo test --locked --workspace -- --test-threads=1
+cargo test --locked --workspace
 ```
 
-Linux CI currently validates formatting, Clippy with warnings denied, a release
-build and the portable package. Porting the remaining macOS-specific UI tests is
-ongoing.
+Linux and Windows CI validate formatting, Clippy with warnings denied, a release
+build and the portable package. Linux CI also builds and checks all three
+packages on Ubuntu 22.04. Porting the remaining macOS-specific UI tests is ongoing.
 
 ### Package for macOS
 
+Release archives target Apple Silicon (arm64); Intel Macs are not covered yet.
 Build a macOS app bundle with icon, `Info.plist`, and ad-hoc signature, plus a
 distributable zip named like the Linux and Windows bundles:
 
@@ -101,15 +95,48 @@ is usually a Dock / IconServices cache issue; installing to one stable path
 (`~/Applications/Lumiere.app`) and launching that copy is more reliable than
 repeatedly running bundles from `build/`, `dist/`, or `/tmp`.
 
+### First launch on macOS: Gatekeeper
+
+The release bundle is **ad-hoc signed**: it carries a signature, but no
+developer identity, so macOS cannot verify who built it. The first time you
+open `Lumiere.app` you will see "cannot be opened because the developer
+cannot be verified". One of these unblocks it:
+
+- right-click (or control-click) `Lumiere.app` in Finder → **Open** → confirm
+  with **Open** in the dialog; or
+- System Settings → Privacy & Security, open the "Lumiere.app was blocked"
+  banner → **Open Anyway**.
+
+Only the first launch asks; afterwards the app opens normally. (Advanced:
+`xattr -d com.apple.quarantine Lumiere.app` removes the quarantine flag that
+triggers the check.) A Developer ID signature plus notarization would remove
+the step entirely — see [docs/release.md](docs/release.md) for the status.
+
 ### Package and install on Linux
 
-Build the portable x86_64 Linux archive on a Linux build host:
+ARM Linux is not covered yet; all three packages target x86_64 and are built
+on Ubuntu 22.04, the oldest supported Ubuntu release. They require compatible
+system graphics libraries and drivers; other distributions are not tested.
+Releases ship three formats — pick whichever fits your distribution:
+
+**`.deb`** (Debian, Ubuntu, Linux Mint, …) installs system-wide and adds a menu
+launcher:
 
 ```sh
-./bundle-linux.sh       # -> dist/lumiere-v<version>-linux-x86_64.tar.gz
+sudo dpkg -i lumiere-v<version>-linux-x86_64.deb
+# or let apt resolve dependencies:
+sudo apt install ./lumiere-v<version>-linux-x86_64.deb
 ```
 
-Extract the archive and run its per-user installer; no `sudo` is required:
+**AppImage** needs no installation — make it executable and run it (it requires
+FUSE, present on most desktops; use `--appimage-extract-and-run` if you lack it):
+
+```sh
+chmod +x lumiere-v<version>-linux-x86_64.AppImage
+./lumiere-v<version>-linux-x86_64.AppImage /path/to/folder
+```
+
+**Portable archive** installs for the current user with no `sudo`:
 
 ```sh
 tar -xzf lumiere-v<version>-linux-x86_64.tar.gz
@@ -117,9 +144,12 @@ cd lumiere-v<version>-linux-x86_64
 ./install.sh
 ```
 
-The installer creates a desktop launcher and hicolor icon-theme entries. Launch
-Lumiere from the application menu so the desktop shell can associate the running
-window with its correctly sized application icon.
+The `.deb` and portable installer create a desktop launcher and hicolor icon
+entries. The AppImage runs directly and does not install a menu entry; use an
+AppImage integration tool or create a launcher yourself if desired.
+
+To build these yourself on a Linux host, use `./bundle-linux-deb.sh`,
+`./bundle-linux-appimage.sh`, or `./bundle-linux.sh` (portable).
 
 ### Package for Windows
 
@@ -229,6 +259,17 @@ checks of the canvas go through key codes; the menu bar, by contrast, is real
 AppKit and fully scriptable.
 Full screen uses a native macOS Space, which `screencapture` may not capture.
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for build and
+test instructions per platform, commit conventions, and the pull request
+checklist. Report bugs and request features through
+[GitHub issues](https://github.com/fetag/lumiere/issues); security concerns go
+through [SECURITY.md](SECURITY.md).
+
+The project follows a [Code of Conduct](CODE_OF_CONDUCT.md), and notable
+changes are tracked in the [changelog](CHANGELOG.md).
+
 ## License
 
 Lumiere is licensed under the [GNU General Public License, version 3 or later](LICENSE)
@@ -243,5 +284,6 @@ The virtual Cargo workspace has three packages: `lumiere` (egui UI and native
 window/menu glue), `lumiere-desktop` (filesystem, workers, cache and native
 services), and `lumiere-core` (commands, session codec and portable pixels).
 Dependencies flow from app to desktop to core. Root build/run still select
-`lumiere`; use `cargo test --locked --workspace -- --test-threads=1` for all packages.
-See [the structure and validation record](docs/structure.md).
+`lumiere`; use `cargo test --locked --workspace` for all packages.
+Contributors: [docs/architecture.md](docs/architecture.md) maps the layers and
+the decode pipeline; see also [the structure and validation record](docs/structure.md).
